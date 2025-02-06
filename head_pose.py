@@ -17,8 +17,7 @@ FOREHEAD = 10
 cap = cv2.VideoCapture(0)
 
 # Define the thresholds for head direction detection
-HORIZONTAL_THRESHOLD = 30  # Threshold for horizontal deviation (left-right)
-VERTICAL_THRESHOLD = 20    # Threshold for vertical deviation (up-down)
+HORIZONTAL_THRESHOLD = 40  # Threshold for horizontal deviation (left-right)
 
 while cap.isOpened():
     ret, frame = cap.read()
@@ -66,7 +65,7 @@ while cap.isOpened():
 
             # Draw the landmarks on the face for visualization
             for point in [nose, left_eye, right_eye, chin, forehead]:
-                cv2.circle(frame, point, 3, (0, 255, 255), -1)
+                cv2.circle(frame, point, 3, (80, 200, 120), -1)
 
     # Show the frame with the detected head position
     cv2.imshow("Head Position Detection", frame)
