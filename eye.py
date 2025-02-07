@@ -1,98 +1,84 @@
 import cv2
 import mediapipe as mp
 import numpy as np
-import math
+import time
 
 # Initialize MediaPipe Face Mesh
 mp_face_mesh = mp.solutions.face_mesh
 mp_drawing = mp.solutions.drawing_utils
 face_mesh = mp_face_mesh.FaceMesh(static_image_mode=False, max_num_faces=1, refine_landmarks=True)
 
-# Indices for facial landmarks (eyes)
-LEFT_EYE = [33, 160, 158, 159, 157, 173]
-RIGHT_EYE = [263, 387, 385, 386, 384, 373]
+# Landmark indices
+LEFT_EYE = [33, 160, 158, 159, 157, 133]  # Left eye outline
+RIGHT_EYE = [362, 385, 387, 386, 384, 263]  # Right eye outline
+LEFT_IRIS = 468  # Left iris center
+RIGHT_IRIS = 473  # Right iris center
 
-# Camera center
-CAMERA_CENTER = (320, 240)
+# Function to compute gaze deviation using iris position
+def iris_gaze_tracking(landmarks, img_w, img_h):
+    left_pupil = np.array([landmarks[LEFT_IRIS].x * img_w, landmarks[LEFT_IRIS].y * img_h])
+    right_pupil = np.array([landmarks[RIGHT_IRIS].x * img_w, landmarks[RIGHT_IRIS].y * img_h])
+    
+    left_eye_center = np.mean([[landmarks[i].x * img_w, landmarks[i].y * img_h] for i in LEFT_EYE], axis=0)
+    right_eye_center = np.mean([[landmarks[i].x * img_w, landmarks[i].y * img_h] for i in RIGHT_EYE], axis=0)
 
-# Function to calculate Eye Aspect Ratio (EAR) for eye openness
-def eye_aspect_ratio(eye_landmarks, img_w, img_h):
-    # Calculate the distance between vertical and horizontal eye landmarks
-    A = np.linalg.norm(np.array([eye_landmarks[1].x * img_w, eye_landmarks[1].y * img_h]) - np.array([eye_landmarks[5].x * img_w, eye_landmarks[5].y * img_h]))
-    B = np.linalg.norm(np.array([eye_landmarks[2].x * img_w, eye_landmarks[2].y * img_h]) - np.array([eye_landmarks[4].x * img_w, eye_landmarks[4].y * img_h]))
-    C = np.linalg.norm(np.array([eye_landmarks[0].x * img_w, eye_landmarks[0].y * img_h]) - np.array([eye_landmarks[3].x * img_w, eye_landmarks[3].y * img_h]))
+    left_gaze_offset = np.linalg.norm(left_pupil - left_eye_center) / img_w
+    right_gaze_offset = np.linalg.norm(right_pupil - right_eye_center) / img_w
 
-    # Eye Aspect Ratio (EAR)
-    ear = (A + B) / (2.0 * C)
-    return ear
+    # Scale the gaze score (lower deviation = better eye contact)
+    gaze_score = max(0, min(100, 100 - (left_gaze_offset + right_gaze_offset) * 500))
+    return gaze_score
 
-# Function to calculate gaze deviation from the center of the camera
-def gaze_deviation(landmarks, img_w, img_h):
-    left_eye_center = np.mean([[landmarks[33].x, landmarks[33].y], [landmarks[159].x, landmarks[159].y]], axis=0)
-    right_eye_center = np.mean([[landmarks[263].x, landmarks[263].y], [landmarks[386].x, landmarks[386].y]], axis=0)
-
-    eye_center_x = (left_eye_center[0] + right_eye_center[0]) / 2 * img_w
-    eye_center_y = (left_eye_center[1] + right_eye_center[1]) / 2 * img_h
-
-    # Calculate the deviation from the center of the camera (CAMERA_CENTER)
-    deviation_x = abs(CAMERA_CENTER[0] - eye_center_x)
-    deviation_y = abs(CAMERA_CENTER[1] - eye_center_y)
-
-    # Combine deviations (scaled to max of 100)
-    gaze_score = 100 - (min(deviation_x, img_w - deviation_x) + min(deviation_y, img_h - deviation_y)) / (max(img_w, img_h) / 2) * 100
-    return max(0, min(100, gaze_score))
-
-# Function to calculate the eye contact level (1-100)
+# Function to compute overall eye contact level
 def get_eye_contact_level(landmarks, img_w, img_h):
-    # Calculate EAR (Eye Aspect Ratio) for both eyes
-    left_eye_ear = eye_aspect_ratio([landmarks[i] for i in LEFT_EYE], img_w, img_h)
-    right_eye_ear = eye_aspect_ratio([landmarks[i] for i in RIGHT_EYE], img_w, img_h)
-
-    # Average EAR for both eyes
-    avg_ear = (left_eye_ear + right_eye_ear) / 2.0
-
-    # Gaze deviation from the center of the camera
-    gaze_score = gaze_deviation(landmarks, img_w, img_h)
-
-    # Calculate eye contact level as a weighted score (combine both)
-    # Higher EAR and lower gaze deviation implies better eye contact
-    eye_contact_level = int((avg_ear * 50) + (gaze_score * 50))
-
-    return max(1, min(100, eye_contact_level))
+    gaze_score = iris_gaze_tracking(landmarks, img_w, img_h)
+    return int(gaze_score)
 
 # Start video capture
-cap = cv2.VideoCapture()
+cap = cv2.VideoCapture(0)
+eye_contact_levels = []  # Store predictions
 
-while cap.isOpened():
-    ret, frame = cap.read()
-    if not ret:
-        break
+start_time = time.time()  # Track time
 
-    # Flip and convert color
-    frame = cv2.flip(frame, 1)
-    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    img_h, img_w, _ = frame.shape
+try:
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+        
+        frame = cv2.flip(frame, 1)
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        img_h, img_w, _ = frame.shape
+        results = face_mesh.process(rgb_frame)
 
-    # Process frame
-    results = face_mesh.process(rgb_frame)
+        if results.multi_face_landmarks:
+            for face_landmarks in results.multi_face_landmarks:
+                mp_drawing.draw_landmarks(frame, face_landmarks, mp_face_mesh.FACEMESH_CONTOURS)
+                
+                eye_contact_level = get_eye_contact_level(face_landmarks.landmark, img_w, img_h)
+                
+                # Display eye contact level
+                cv2.putText(frame, f"Eye Contact Level: {eye_contact_level}%", (30, 50), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
-    if results.multi_face_landmarks:
-        for face_landmarks in results.multi_face_landmarks:
-            # Draw face mesh
-            mp_drawing.draw_landmarks(frame, face_landmarks, mp_face_mesh.FACEMESH_CONTOURS)
+                # Check if 5 seconds have passed
+                if time.time() - start_time >= 5:
+                    eye_contact_levels.append(eye_contact_level)
+                    print(f"Eye Contact Level Recorded: {eye_contact_level}%")
+                    start_time = time.time()  # Reset timer
 
-            # Get eye contact level
-            eye_contact_level = get_eye_contact_level(face_landmarks.landmark, img_w, img_h)
+        cv2.imshow("Eye Contact Detection with Iris Tracking", frame)
 
-            # Display eye contact level
-            cv2.putText(frame, f"Eye Contact Level: {eye_contact_level}", (50, 50),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        if cv2.waitKey(1) & 0xFF == ord('q'):  # Press 'q' to stop
+            break
 
-    # Show frame
-    cv2.imshow("Eye Contact Level Detection", frame)
-
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
-
-cap.release()
-cv2.destroyAllWindows()
+finally:
+    cap.release()
+    cv2.destroyAllWindows()
+    
+    # Calculate and print the mean eye contact level
+    if eye_contact_levels:
+        mean_eye_contact = sum(eye_contact_levels) / len(eye_contact_levels)
+        print(f"Mean Eye Contact Level: {mean_eye_contact:.2f}%")
+    else:
+        print("No eye contact data recorded.")
