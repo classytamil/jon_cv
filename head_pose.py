@@ -98,3 +98,4 @@ finally:
     print("\nFinal Head Position Data:")
     for log in head_position_logs:
         print(log)
+        
