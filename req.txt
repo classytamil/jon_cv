@@ -4,13 +4,9 @@ numpy
 streamlit
 fer 
 moviepy
-
-
 streamlit
 streamlit-webrtc
 opencv-python
 mediapipe
 av
 numpy
-
-
